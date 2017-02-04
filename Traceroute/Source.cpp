@@ -4,6 +4,8 @@ using namespace std;
 
 const int packageDataSize = 32;
 const int TIMEOUT_MS = 2000;
+const bool TRACEROUTE = true;
+const int HOPS_COUNT = 20;
 
 int main()
 {
@@ -32,7 +34,7 @@ int main()
 
 void Input(string* ip, string* ipLocal)
 {
-	cout << "Ping: ";
+	cout << (TRACEROUTE ? "Traceroute:" : "Ping: ");
 	getline(cin, *ip);
 	if (ip->empty())
 	{
@@ -42,7 +44,10 @@ void Input(string* ip, string* ipLocal)
 #elif defined __linux__
 		cout << "\033[2j\033[1;1H";
 #endif
-		cout << "Ping: 213.180.204.3 [yandex.ru]" << endl;
+		if (TRACEROUTE)
+			cout << "Traceroute: 213.180.204.3 [yandex.ru]" << endl;
+		else
+			cout << "Ping: 213.180.204.3 [yandex.ru]" << endl;
 	}
 
 	cout << "Sender ip: ";
@@ -76,12 +81,18 @@ void Work(SOCKET my_socket, string ip, string ipLocal, sockaddr_in remoteAddr)
 		char* ip_package = new char[ip_size];
 
 		InitIpPackage(ip_package, my_socket, ip_size, icmp_size, icmp_package, ip, ipLocal);
-		Ping(my_socket, ip, ip_package, ip_size, remoteAddr);
+		if (TRACEROUTE)
+			Traceroute(my_socket, ip, ip_package, ip_size, remoteAddr, true);
+		else
+			Ping(my_socket, ip, ip_package, ip_size, remoteAddr);
 
 		delete[] ip_package;
 	}
 	else
-		Ping(my_socket, ip, (char*)icmp_package, icmp_size, remoteAddr);
+		if (TRACEROUTE)
+			Traceroute(my_socket, ip, (char*)icmp_package, icmp_size, remoteAddr, false);
+		else
+			Ping(my_socket, ip, (char*)icmp_package, icmp_size, remoteAddr);
 
 	delete[] icmp;
 }
@@ -151,11 +162,11 @@ void Ping(SOCKET my_socket, string ip, char* package, int package_size, sockaddr
 #elif defined __linux__
 		socklen_t outlent = sizeof(sockaddr_in);
 #endif
-		sockaddr_in out_ = { 0 };
-		out_.sin_family = AF_INET;
+		sockaddr_in out = { 0 };
+		out.sin_family = AF_INET;
 
 #if  defined _WIN32 || defined _WIN64
-		if (recvfrom(my_socket, bf, 256, 0, (sockaddr*)&out_, &outlent) == SOCKET_ERROR)
+		if (recvfrom(my_socket, bf, 256, 0, (sockaddr*)&out, &outlent) == SOCKET_ERROR)
 		{
 			if (WSAGetLastError() == WSAETIMEDOUT)
 			{
@@ -173,14 +184,14 @@ void Ping(SOCKET my_socket, string ip, char* package, int package_size, sockaddr
 			continue;
 		default:
 			break;
-		}
+			}
 		if (recvfrom(my_socket, bf, 256, 0, (sockaddr*)&out_, &outlent) == SOCKET_ERROR)
 			PrintLastError();
 #endif
 #if  defined _WIN32 || defined _WIN64
-		Analize(bf, &out_, GetTickCount() - sendTime);
+		Analyze(bf, &out, GetTickCount() - sendTime);
 #elif defined __linux__
-		Analize(bf, &out_, time(0) - sendTime);
+		Analyze(bf, &out_, time(0) - sendTime);
 #endif
 		memset(bf, 0, 0);
 #if  defined _WIN32 || defined _WIN64
@@ -188,6 +199,47 @@ void Ping(SOCKET my_socket, string ip, char* package, int package_size, sockaddr
 #elif defined __linux__
 		sleep(1);
 #endif
+		}
+}
+
+void Traceroute(SOCKET my_socket, string ip, char* package, int package_size, sockaddr_in remoteAddr, bool manualIp)
+{
+	unsigned int control = remoteAddr.sin_addr.S_un.S_addr;
+
+	cout << "Tracing route to " << ip << " over a maximum of " << HOPS_COUNT << " hops" << endl;
+	for (int i = 1; i <= HOPS_COUNT; ++i)
+	{
+		if (manualIp) {
+			IpHeader* ipH = (IpHeader*)package;
+			ipH->ttl = i;
+		}
+		else
+			setsockopt(my_socket, IPPROTO_IP, IP_TTL, (char*)&i, 4);
+
+		sendto(my_socket, (char*)package, package_size, 0, (sockaddr*)&remoteAddr, sizeof(remoteAddr));
+		Sleep(1000);
+
+		char bf[256] = { 0 };
+#if  defined _WIN32 || defined _WIN64
+		int outlent = sizeof(sockaddr_in);
+#elif defined __linux__
+		socklen_t outlent = sizeof(sockaddr_in);
+#endif
+		sockaddr_in out = { 0 };
+		out.sin_family = AF_INET;
+
+		if (recvfrom(my_socket, bf, 256, 0, (sockaddr*)&out, &outlent) == SOCKET_ERROR)
+		{
+			if (WSAGetLastError() == WSAETIMEDOUT)
+			{
+				cout << i << " Request timeout\n";
+				continue;
+			}
+		}
+		cout << i << " ";
+		if (Analyze(bf, &out) == control)
+			break;
+		memset(bf, 0, 0);
 	}
 }
 
@@ -204,7 +256,7 @@ sockaddr_in InitAddress(unsigned long addr)
 	return address;
 }
 
-unsigned int Analize(char* data, sockaddr_in* adr, DWORD time) //analize reply
+unsigned int Analyze(char* data, sockaddr_in* adr, DWORD time) //analyze reply
 {
 	char* Ip = "";
 	IpHeader *ipPacket = (IpHeader*)data;
@@ -213,17 +265,26 @@ unsigned int Analize(char* data, sockaddr_in* adr, DWORD time) //analize reply
 	getnameinfo((struct sockaddr *) adr, sizeof(struct sockaddr), Name, NI_MAXHOST, servInfo, NI_MAXSERV, NI_NUMERICSERV);
 	Ip = inet_ntoa(adr->sin_addr);
 
-	int TTL = (int)ipPacket->ttl;
-	data += sizeof(IpHeader);
-	IcmpHeader *icmpPacket = (IcmpHeader*)data;
-#if  defined _WIN32 || defined _WIN64
-	if (GetCurrentProcessId() == icmpPacket->i_id) //check if we sent it
-#elif defined __linux__
-	if (getpid() == icmpPacket->i_id) //check if we sent it
-#endif
-		cout << "Reply from " << Ip << ": time=" << time << "ms TTL=" << TTL << endl;
+	if (TRACEROUTE)
+	{
+		IcmpHeader *icmpPacket = (IcmpHeader*)data;
+		cout << "Reply from " << " " << Name << " [" << Ip << "]" << endl;
+	}
 	else
-		cout << "Fake packet\n";
+	{
+		int TTL = (int)ipPacket->ttl;
+		data += sizeof(IpHeader);
+		IcmpHeader *icmpPacket = (IcmpHeader*)data;
+#if  defined _WIN32 || defined _WIN64
+		if (GetCurrentProcessId() == icmpPacket->i_id) //check if we sent it
+#elif defined __linux__
+		if (getpid() == icmpPacket->i_id) //check if we sent it
+#endif
+			cout << "Reply from " << Ip << ": time=" << time << "ms TTL=" << TTL << endl;
+		else
+			cout << "Fake packet\n";
+	}
+
 	return ipPacket->source;
 }
 

@@ -37,7 +37,6 @@ int MySelect(int socket);
 
 using namespace std;
 
-
 typedef struct ip_hdr //IP header
 {
 	unsigned char verhlen;
@@ -77,7 +76,9 @@ void InitIpPackage(char* ip_package, SOCKET my_socket, int ip_size, int icmp_siz
 
 void Ping(SOCKET my_socket, string ip, char* package, int package_size, sockaddr_in remoteAddr);
 
-unsigned int Analize(char* data, sockaddr_in* adr, DWORD time);
+void Traceroute(SOCKET my_socket, string ip, char* package, int package_size, sockaddr_in remoteAddr, bool manualIp);
+
+unsigned int Analyze(char* data, sockaddr_in* adr, DWORD time = NULL);
 
 USHORT crc2(USHORT* addr, int count);
 
