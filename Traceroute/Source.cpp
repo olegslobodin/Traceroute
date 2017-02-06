@@ -11,7 +11,7 @@ int main()
 {
 #if  defined _WIN32 || defined _WIN64
 	_CrtSetDbgFlag(33);
-#endif;
+#endif
 
 	string ip, ipLocal;
 	Input(&ip, &ipLocal);
@@ -27,7 +27,7 @@ int main()
 	WSACleanup();
 
 	system("Pause");
-#endif;
+#endif
 
 	return 0;
 }
@@ -185,13 +185,13 @@ void Ping(SOCKET my_socket, string ip, char* package, int package_size, sockaddr
 		default:
 			break;
 			}
-		if (recvfrom(my_socket, bf, 256, 0, (sockaddr*)&out_, &outlent) == SOCKET_ERROR)
+		if (recvfrom(my_socket, bf, 256, 0, (sockaddr*)&out, &outlent) == SOCKET_ERROR)
 			PrintLastError();
 #endif
 #if  defined _WIN32 || defined _WIN64
 		Analyze(bf, &out, GetTickCount() - sendTime);
 #elif defined __linux__
-		Analyze(bf, &out_, time(0) - sendTime);
+		Analyze(bf, &out, time(0) - sendTime);
 #endif
 		memset(bf, 0, 0);
 #if  defined _WIN32 || defined _WIN64
@@ -204,7 +204,11 @@ void Ping(SOCKET my_socket, string ip, char* package, int package_size, sockaddr
 
 void Traceroute(SOCKET my_socket, string ip, char* package, int package_size, sockaddr_in remoteAddr, bool manualIp)
 {
-	unsigned int control = remoteAddr.sin_addr.S_un.S_addr;
+#if  defined _WIN32 || defined _WIN64
+    unsigned int control = remoteAddr.sin_addr.S_un.S_addr;
+#elif defined __linux__
+    unsigned int control = remoteAddr.sin_addr.s_addr;
+#endif
 
 	cout << "Tracing route to " << ip << " over a maximum of " << HOPS_COUNT << " hops" << endl;
 	for (int i = 1; i <= HOPS_COUNT; ++i)
@@ -217,7 +221,12 @@ void Traceroute(SOCKET my_socket, string ip, char* package, int package_size, so
 			setsockopt(my_socket, IPPROTO_IP, IP_TTL, (char*)&i, 4);
 
 		sendto(my_socket, (char*)package, package_size, 0, (sockaddr*)&remoteAddr, sizeof(remoteAddr));
-		Sleep(1000);
+
+#if  defined _WIN32 || defined _WIN64
+        Sleep(1000);
+#elif defined __linux__
+        sleep(1);
+#endif
 
 		char bf[256] = { 0 };
 #if  defined _WIN32 || defined _WIN64
@@ -230,7 +239,9 @@ void Traceroute(SOCKET my_socket, string ip, char* package, int package_size, so
 
 		if (recvfrom(my_socket, bf, 256, 0, (sockaddr*)&out, &outlent) == SOCKET_ERROR)
 		{
-			if (WSAGetLastError() == WSAETIMEDOUT)
+#if  defined _WIN32 || defined _WIN64
+            if (WSAGetLastError() == WSAETIMEDOUT)
+#endif
 			{
 				cout << i << " Request timeout\n";
 				continue;
